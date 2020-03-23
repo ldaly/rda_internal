@@ -1584,8 +1584,17 @@ div.tocify {
 </div>
 
 
+<div id="part-i-race-counts-indicator-from-regular-acs-estimates" class="section level1">
+<h1>Part I: RACE COUNTS Indicator from Regular ACS Estimates</h1>
+<p>Example: Get the median household income at the county level for all race/ethnicity groups.</p>
 <div id="step-1-load-relevant-libraries-and-census-api" class="section level2">
 <h2>Step 1: Load relevant libraries and Census API</h2>
+<ul>
+<li><p>Use the Census API to load all race/ethnicity tables at once.</p></li>
+<li><p>Use the R package <code>tidycensus</code> in order to efficiently manage the data in a “tidy”, or long, format, and to use the built-in functions for MOE calculations.</p></li>
+<li><p>I recommend going through the <code>tidycensus</code> <a href="https://walkerke.github.io/tidycensus/articles/basic-usage.html">mini-tutorial</a> to get a better idea of what all this means, how to effectively utilize this package for examples that might deviate from this one.</p></li>
+<li><p>Ideally you sign up for <a href="https://api.census.gov/data/key_signup.html">your own Census API key:</a></p></li>
+</ul>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb1-1" title="1"><span class="kw">library</span>(dplyr)</a>
 <a class="sourceLine" id="cb1-2" title="2"><span class="kw">library</span>(tidycensus)</a>
 <a class="sourceLine" id="cb1-3" title="3"><span class="kw">library</span>(tidyverse)</a>
@@ -1957,6 +1966,406 @@ div.tocify {
 <li>DB: whole_child, View: puma_above_poverty_0_8</li>
 </ul></li>
 </ul>
+</div>
+</div>
+<div id="part-ii-race-counts-indicator-from-pums-data" class="section level1">
+<h1>Part II: RACE COUNTS Indicator from PUMS Data</h1>
+<ul>
+<li><p>The steps are very similar, just a matter of different data sources.</p></li>
+<li><p>Example: Percentage of children (0-8 years) who are living below the poverty level (from the Whole Child project).</p></li>
+<li><p>PUMS data comes in two separate files, one for person records and one for housing records. To combine person-based information with household-based information, for example the median household income of Latinx households, you’ll need to join the two files using the field ‘SERIALNO’.</p>
+<ul>
+<li>Note that the column SERIALNO is <strong>not</strong> a unique ID in the person file, because there can be multiple people within one household.</li>
+</ul></li>
+<li><p>Information on PUMS Data:</p>
+<ul>
+<li><p><a href="https://www.census.gov/programs-surveys/acs/news/data-releases/2018/release.html" class="uri">https://www.census.gov/programs-surveys/acs/news/data-releases/2018/release.html</a></p></li>
+<li><p>Technical documentation: <a href="https://www.census.gov/programs-surveys/acs/technical-documentation/pums/documentation/2018.html" class="uri">https://www.census.gov/programs-surveys/acs/technical-documentation/pums/documentation/2018.html</a></p></li>
+</ul></li>
+</ul>
+<div id="step-1-load-and-prepare-pums-data" class="section level2">
+<h2>Step 1: Load and prepare PUMS data</h2>
+<ul>
+<li><p>You can download the CA PUMS data from the USCB FTP here:</p>
+<ul>
+<li><a href="https://www2.census.gov/programs-surveys/acs/data/pums/2018/5-Year/" class="uri">https://www2.census.gov/programs-surveys/acs/data/pums/2018/5-Year/</a></li>
+</ul></li>
+<li><p>File prefix ‘p’ is person records, prefix ‘h’ is household record. For example, file ‘csv_pca.zip’ is a csv of the person records for California.</p></li>
+</ul>
+<div class="sourceCode" id="cb30"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb30-1" title="1"><span class="co"># path where my data lives (not pulling pums data from the postgres db, too time-consuming) </span></a>
+<a class="sourceLine" id="cb30-2" title="2">rc_root &lt;-<span class="st"> &quot;C:/Users/LDaly/Desktop/RACE COUNTS QA/&quot;</span></a>
+<a class="sourceLine" id="cb30-3" title="3">root &lt;-<span class="st"> &quot;C:/Users/LDaly/Downloads/CA_2014_2018/&quot;</span></a>
+<a class="sourceLine" id="cb30-4" title="4"></a>
+<a class="sourceLine" id="cb30-5" title="5"><span class="co"># Load the people PUMS data</span></a>
+<a class="sourceLine" id="cb30-6" title="6">ppl &lt;-<span class="st"> </span><span class="kw">fread</span>(<span class="kw">paste0</span>(root, <span class="st">&quot;psam_p06.csv&quot;</span>), <span class="dt">header =</span> <span class="ot">TRUE</span>, <span class="dt">data.table =</span> <span class="ot">FALSE</span>, </a>
+<a class="sourceLine" id="cb30-7" title="7">             <span class="dt">colClasses =</span> <span class="kw">c</span>(<span class="st">&quot;PUMA&quot;</span> =<span class="st"> &quot;character&quot;</span>))  <span class="co"># set the PUMA column to character</span></a>
+<a class="sourceLine" id="cb30-8" title="8"></a>
+<a class="sourceLine" id="cb30-9" title="9"></a>
+<a class="sourceLine" id="cb30-10" title="10"><span class="co"># Load crosswalk for COUNTY - PUMAS. </span></a>
+<a class="sourceLine" id="cb30-11" title="11"><span class="co"># I copied this from the W drive (which is the source of the crosswalk on the postgres db): W:\Data\Geographies\Crosswalks</span></a>
+<a class="sourceLine" id="cb30-12" title="12">crosswalk &lt;-<span class="st"> </span><span class="kw">fread</span>(<span class="kw">paste0</span>(rc_root, <span class="st">&quot;county_puma_crosswalk_edited.csv&quot;</span>), <span class="dt">data.table =</span> <span class="ot">FALSE</span>, </a>
+<a class="sourceLine" id="cb30-13" title="13">                   <span class="dt">colClasses =</span> <span class="kw">c</span>(<span class="st">&quot;county&quot;</span>=<span class="st">&quot;character&quot;</span>, <span class="st">&quot;puma12&quot;</span>=<span class="st">&quot;character&quot;</span>))</a></code></pre></div>
+<ul>
+<li>Note that for very small counties there may be 1 PUMA for 1+ Counties. This means that this crosswalk, when joined to the PUMA data, will <strong>duplicate</strong> PUMA records and give you an incorrect overcount of people. All to say, if you’re joining the county crosswalk to your PUMA file, make sure you’re grouping by county.</li>
+</ul>
+<div class="sourceCode" id="cb31"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb31-1" title="1"><span class="co"># For this project we only wanted data for children 0-8</span></a>
+<a class="sourceLine" id="cb31-2" title="2"></a>
+<a class="sourceLine" id="cb31-3" title="3"><span class="co"># subset data frame, where age is less than or equal to 8</span></a>
+<a class="sourceLine" id="cb31-4" title="4">ppl &lt;-<span class="st"> </span>ppl[ppl<span class="op">$</span>AGEP <span class="op">&lt;=</span><span class="st"> </span><span class="dv">8</span>, ]</a>
+<a class="sourceLine" id="cb31-5" title="5"></a>
+<a class="sourceLine" id="cb31-6" title="6"></a>
+<a class="sourceLine" id="cb31-7" title="7"><span class="co">## Recode race/eth</span></a>
+<a class="sourceLine" id="cb31-8" title="8">ppl<span class="op">$</span>latino &lt;-<span class="st"> &quot;Latinx&quot;</span></a>
+<a class="sourceLine" id="cb31-9" title="9">ppl<span class="op">$</span>latino[ppl<span class="op">$</span>HISP<span class="op">==</span><span class="dv">1</span>] &lt;-<span class="st"> &quot;not Latinx&quot;</span></a>
+<a class="sourceLine" id="cb31-10" title="10">ppl<span class="op">$</span>latino &lt;-<span class="st"> </span><span class="kw">as.factor</span>(ppl<span class="op">$</span>latino)</a>
+<a class="sourceLine" id="cb31-11" title="11"></a>
+<a class="sourceLine" id="cb31-12" title="12"><span class="co"># code race groups</span></a>
+<a class="sourceLine" id="cb31-13" title="13">ppl<span class="op">$</span>race =<span class="st"> </span><span class="kw">as.factor</span>(<span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">==</span><span class="st"> </span><span class="dv">1</span> <span class="op">&amp;</span><span class="st"> </span>ppl<span class="op">$</span>latino <span class="op">==</span><span class="st">&quot;not Latinx&quot;</span>, <span class="st">&quot;White non-Latinx&quot;</span>,</a>
+<a class="sourceLine" id="cb31-14" title="14">                            <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">==</span><span class="st"> </span><span class="dv">1</span> <span class="op">&amp;</span><span class="st"> </span>ppl<span class="op">$</span>latino <span class="op">==</span><span class="st">&quot;Latinx&quot;</span>, <span class="st">&quot;White&quot;</span>,</a>
+<a class="sourceLine" id="cb31-15" title="15">                                   <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">==</span><span class="st"> </span><span class="dv">2</span>, <span class="st">&quot;Black&quot;</span>,</a>
+<a class="sourceLine" id="cb31-16" title="16">                                          <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">&gt;=</span><span class="st"> </span><span class="dv">3</span> <span class="op">&amp;</span><span class="st"> </span>ppl<span class="op">$</span>RAC1P <span class="op">&lt;=</span><span class="dv">5</span>, <span class="st">&quot;AIAN&quot;</span>,</a>
+<a class="sourceLine" id="cb31-17" title="17">                                                 <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">==</span><span class="st"> </span><span class="dv">6</span>, <span class="st">&quot;Asian&quot;</span>,</a>
+<a class="sourceLine" id="cb31-18" title="18">                                                        <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">==</span><span class="st"> </span><span class="dv">7</span>, <span class="st">&quot;NHPI&quot;</span>,</a>
+<a class="sourceLine" id="cb31-19" title="19">                                                               <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P <span class="op">==</span><span class="dv">8</span>, <span class="st">&quot;Other&quot;</span>, </a>
+<a class="sourceLine" id="cb31-20" title="20">                                                                      <span class="kw">ifelse</span>(ppl<span class="op">$</span>RAC1P<span class="op">==</span><span class="dv">9</span>, <span class="st">&quot;Two or More&quot;</span>, <span class="ot">NA</span>))))))))) </a>
+<a class="sourceLine" id="cb31-21" title="21"><span class="co"># note that the White Latinx people will not be included in White, only included in Latinx</span></a></code></pre></div>
+<div id="review-results-of-race-coding" class="section level4">
+<h4>Review results of race coding</h4>
+<div class="sourceCode" id="cb32"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb32-1" title="1"><span class="co"># review data</span></a>
+<a class="sourceLine" id="cb32-2" title="2"><span class="kw">table</span>(ppl<span class="op">$</span>race, <span class="dt">useNA =</span> <span class="st">&quot;always&quot;</span>)</a></code></pre></div>
+<pre><code>## 
+##             AIAN            Asian            Black             NHPI 
+##             1925            24148             7887              641 
+##            Other      Two or More            White White non-Latinx 
+##            27559            19479            50765            52712 
+##             &lt;NA&gt; 
+##                0</code></pre>
+</div>
+<div id="code-the-poverty-level-variable" class="section level4">
+<h4>Code the poverty level variable</h4>
+<div class="sourceCode" id="cb34"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb34-1" title="1"><span class="co"># recode income-to-poverty ratio</span></a>
+<a class="sourceLine" id="cb34-2" title="2">ppl<span class="op">$</span>poverty &lt;-<span class="st"> &quot;at or above the poverty level&quot;</span></a>
+<a class="sourceLine" id="cb34-3" title="3">ppl<span class="op">$</span>poverty[ppl<span class="op">$</span>POVPIP <span class="op">&lt;</span><span class="st"> </span><span class="dv">100</span>] &lt;-<span class="st"> &quot;below the poverty level&quot;</span></a>
+<a class="sourceLine" id="cb34-4" title="4">ppl<span class="op">$</span>poverty =<span class="st"> </span><span class="kw">as.factor</span>(ppl<span class="op">$</span>poverty)</a></code></pre></div>
+</div>
+<div id="join-the-county-crosswalk-file" class="section level4">
+<h4>Join the county crosswalk file</h4>
+<div class="sourceCode" id="cb35"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb35-1" title="1"><span class="co"># join county crosswalk using left join function</span></a>
+<a class="sourceLine" id="cb35-2" title="2">ppl &lt;-<span class="st"> </span><span class="kw">left_join</span>(ppl, crosswalk[,<span class="kw">c</span>(<span class="dv">1</span><span class="op">:</span><span class="dv">4</span>)],  <span class="co"># left join (only columns 1 through 4) to the ppl column</span></a>
+<a class="sourceLine" id="cb35-3" title="3">                 <span class="dt">by=</span><span class="kw">c</span>(<span class="st">&quot;PUMA&quot;</span>=<span class="st">&quot;puma12&quot;</span>))    <span class="co"># specify the field join</span></a>
+<a class="sourceLine" id="cb35-4" title="4"></a>
+<a class="sourceLine" id="cb35-5" title="5">ppl<span class="op">$</span>county &lt;-<span class="st"> </span><span class="kw">as.factor</span>(ppl<span class="op">$</span>county)</a></code></pre></div>
+</div>
+</div>
+<div id="step-2-set-up-the-survey-design" class="section level2">
+<h2>Step 2: Set Up the Survey Design</h2>
+<ul>
+<li><p>Using the <code>srvyr</code> package</p></li>
+<li><p>See tutorial <a href="https://ldaly.github.io/giveinandblogit">here</a> for more information on using the srvyr function to calculate summaries and SEs on PUMS data:</p></li>
+</ul>
+<div id="note" class="section level4">
+<h4>NOTE:</h4>
+<ul>
+<li>I’m calculating race groups as Latinx inclusive (except white), which is why these data are summarized in three groups (race, Latinx, total). If we want the race groups to be exclusive of Latinx we could summarize all race/ethnicity groups at once.</li>
+</ul>
+<div class="sourceCode" id="cb36"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb36-1" title="1"><span class="co"># load srvyr library</span></a>
+<a class="sourceLine" id="cb36-2" title="2"><span class="kw">library</span>(srvyr)</a>
+<a class="sourceLine" id="cb36-3" title="3"></a>
+<a class="sourceLine" id="cb36-4" title="4"><span class="co"># create list of replicate weights</span></a>
+<a class="sourceLine" id="cb36-5" title="5">repwlist =<span class="st"> </span><span class="kw">rep</span>(<span class="kw">paste0</span>(<span class="st">&quot;PWGTP&quot;</span>,<span class="dv">1</span><span class="op">:</span><span class="dv">80</span>))</a>
+<a class="sourceLine" id="cb36-6" title="6"></a>
+<a class="sourceLine" id="cb36-7" title="7"><span class="co"># create survey design  for latinx poverty rate by county</span></a>
+<a class="sourceLine" id="cb36-8" title="8">pumsdpov &lt;-<span class="st"> </span></a>
+<a class="sourceLine" id="cb36-9" title="9"><span class="st">  </span>ppl <span class="op">%&gt;%</span><span class="st">               </span><span class="co"># Use the filtered data (only 0-8 years)</span></a>
+<a class="sourceLine" id="cb36-10" title="10"><span class="st">  </span><span class="kw">as_survey_rep</span>(</a>
+<a class="sourceLine" id="cb36-11" title="11">    <span class="dt">variables =</span> <span class="kw">c</span>(county, race, latino, poverty),   <span class="co"># select grouping variables</span></a>
+<a class="sourceLine" id="cb36-12" title="12">    <span class="dt">weights =</span> PWGTP,                        <span class="co"># person weight</span></a>
+<a class="sourceLine" id="cb36-13" title="13">    <span class="dt">repweights =</span> repwlist,                  <span class="co"># list of replicate weights</span></a>
+<a class="sourceLine" id="cb36-14" title="14">    <span class="dt">combined_weights =</span> <span class="ot">TRUE</span>,                <span class="co"># tells the function that replicate weights are included in the data</span></a>
+<a class="sourceLine" id="cb36-15" title="15">    <span class="dt">mse =</span><span class="ot">TRUE</span>,                              <span class="co"># tells the function to calc mse</span></a>
+<a class="sourceLine" id="cb36-16" title="16">    <span class="dt">type=</span><span class="st">&quot;other&quot;</span>,                           <span class="co"># statistical method</span></a>
+<a class="sourceLine" id="cb36-17" title="17">    <span class="dt">scale=</span><span class="dv">4</span><span class="op">/</span><span class="dv">80</span>,                             <span class="co"># scaling set by ACS</span></a>
+<a class="sourceLine" id="cb36-18" title="18">    <span class="dt">rscale=</span><span class="kw">rep</span>(<span class="dv">1</span>,<span class="dv">80</span>)                        <span class="co"># setting specific to ACS-scaling</span></a>
+<a class="sourceLine" id="cb36-19" title="19">  )</a></code></pre></div>
+</div>
+<div id="review-the-survey-design-object" class="section level4">
+<h4>Review the survey design object</h4>
+<ul>
+<li>We can see it has stored the survey weight, the names of the 80 columns with replicate weights, and the nanes of the variables we want to use.</li>
+</ul>
+<div class="sourceCode" id="cb37"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb37-1" title="1">pumsdpov</a></code></pre></div>
+<pre><code>## Call: Called via srvyr
+## with 80 replicates and MSE variances.
+## Sampling variables:
+##  - repweights: `PWGTP1 + PWGTP2 + PWGTP3 + PWGTP4 + PWGTP5 + PWGTP6 + PWGTP7 + PWGTP8 + PWGTP9 + PWGTP10 + PWGTP11 + PWGTP12 + PWGTP13 + PWGTP14 + PWGTP15 + PWGTP16 + PWGTP17 + PWGTP18 + PWGTP19 + PWGTP20 + PWGTP21 + PWGTP22 + PWGTP23 + PWGTP24 + PWGTP25 + PWGTP26 + PWGTP27 + PWGTP28 + PWGTP29 + PWGTP30 + PWGTP31 + PWGTP32 + PWGTP33 + PWGTP34 + PWGTP35 + PWGTP36 + PWGTP37 + PWGTP38 + PWGTP39 + PWGTP40 + PWGTP41 + PWGTP42 + PWGTP43 + PWGTP44 + PWGTP45 + PWGTP46 + PWGTP47 + PWGTP48 + PWGTP49 + PWGTP50 + PWGTP51 + \n    PWGTP52 + PWGTP53 + PWGTP54 + PWGTP55 + PWGTP56 + PWGTP57 + PWGTP58 + PWGTP59 + PWGTP60 + PWGTP61 + PWGTP62 + PWGTP63 + PWGTP64 + PWGTP65 + PWGTP66 + PWGTP67 + PWGTP68 + PWGTP69 + PWGTP70 + PWGTP71 + PWGTP72 + PWGTP73 + PWGTP74 + PWGTP75 + PWGTP76 + PWGTP77 + PWGTP78 + PWGTP79 + PWGTP80`
+##  - weights: PWGTP
+## Data variables: county (fct), race (fct), latino (fct), poverty (fct)</code></pre>
+</div>
+</div>
+<div id="step-3-summarize-data" class="section level2">
+<h2>Step 3: Summarize data</h2>
+<ul>
+<li>Use the survey design object <code>pumsdpov</code> to summarize the data and calculate the SEs.</li>
+</ul>
+<div id="quick-example-of-how-the-summary-looks" class="section level4">
+<h4>Quick example of how the summary looks:</h4>
+<ol style="list-style-type: decimal">
+<li><p>Use the survey design object</p></li>
+<li><p>Group by county, ethnicity and poverty rate</p></li>
+<li><p>Within the <code>summarise</code> function, use the function <code>survey_total</code>. This function will summarize using our survey weight and calculate a standard error using replicate weights.</p></li>
+</ol>
+<p>Example:</p>
+<div class="sourceCode" id="cb39"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb39-1" title="1"> pumsdpov <span class="op">%&gt;%</span></a>
+<a class="sourceLine" id="cb39-2" title="2"><span class="st">  </span><span class="kw">group_by</span>(county, latino, poverty) <span class="op">%&gt;%</span><span class="st">  </span></a>
+<a class="sourceLine" id="cb39-3" title="3"><span class="st">  </span><span class="kw">summarise</span>(</a>
+<a class="sourceLine" id="cb39-4" title="4">    <span class="dt">count =</span> <span class="kw">survey_total</span>())</a></code></pre></div>
+<pre><code>## # A tibble: 232 x 5
+##    county latino     poverty                        count count_se
+##    &lt;fct&gt;  &lt;fct&gt;      &lt;fct&gt;                          &lt;dbl&gt;    &lt;dbl&gt;
+##  1 06001  Latinx     at or above the poverty level  45117     904.
+##  2 06001  Latinx     below the poverty level         9558     726.
+##  3 06001  not Latinx at or above the poverty level 109185    1074.
+##  4 06001  not Latinx below the poverty level        10709     739.
+##  5 06003  Latinx     at or above the poverty level   3094     204.
+##  6 06003  Latinx     below the poverty level          600     143.
+##  7 06003  not Latinx at or above the poverty level   9036     398.
+##  8 06003  not Latinx below the poverty level         2258     328.
+##  9 06005  Latinx     at or above the poverty level   3094     204.
+## 10 06005  Latinx     below the poverty level          600     143.
+## # ... with 222 more rows</code></pre>
+</div>
+<div id="start-with-summary-by-latinx" class="section level4">
+<h4>Start with summary by Latinx:</h4>
+<ul>
+<li><p>Calculate the numerator (Latinx by county by poverty category), left join the denominator (Latinx by county).</p></li>
+<li><p>Use <code>mutate</code> to add columns for:</p>
+<ul>
+<li><p>the percent calculation</p></li>
+<li><p>the derived margin of error calculation for percentages, using the function <code>moe_ratio</code> from the <code>tidycensus</code> package. Note that the <code>moe_ratio</code> function takes margins of error as inputs, which is why I’ve multipled the SE by 1.645 (90% MOE, default of the Census).</p></li>
+<li><p>the coefficient of variation (CV), which is the SE divided by the estimate. I’ve divided the MOE by 1.645 to get the SE.</p></li>
+</ul></li>
+</ul>
+<div class="sourceCode" id="cb41"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb41-1" title="1"><span class="co"># calculate child pop count by lat </span></a>
+<a class="sourceLine" id="cb41-2" title="2">povChild_lat &lt;-<span class="st"> </span></a>
+<a class="sourceLine" id="cb41-3" title="3"><span class="st">  </span>pumsdpov <span class="op">%&gt;%</span></a>
+<a class="sourceLine" id="cb41-4" title="4"><span class="st">  </span><span class="kw">group_by</span>(county, latino, poverty) <span class="op">%&gt;%</span><span class="st">   </span><span class="co"># group by county, latinx and poverty</span></a>
+<a class="sourceLine" id="cb41-5" title="5"><span class="st">  </span><span class="kw">summarise</span>(</a>
+<a class="sourceLine" id="cb41-6" title="6">    <span class="dt">count =</span> <span class="kw">survey_total</span>()) <span class="op">%&gt;%</span><span class="st">        </span><span class="co"># get the (survey weighted) count of children in each poverty group for the numerators</span></a>
+<a class="sourceLine" id="cb41-7" title="7"><span class="st">  </span></a>
+<a class="sourceLine" id="cb41-8" title="8"><span class="st">  </span><span class="kw">left_join</span>(pumsdpov <span class="op">%&gt;%</span><span class="st">                                        </span><span class="co"># left join in the denominators (total children bylatinx )</span></a>
+<a class="sourceLine" id="cb41-9" title="9"><span class="st">              </span><span class="kw">group_by</span>(county, latino) <span class="op">%&gt;%</span><span class="st">                      </span><span class="co"># group by latinx &amp; county</span></a>
+<a class="sourceLine" id="cb41-10" title="10"><span class="st">              </span><span class="kw">summarise</span>(<span class="dt">tot =</span> <span class="kw">survey_total</span>())) <span class="op">%&gt;%</span><span class="st">              </span><span class="co"># get the weighted total</span></a>
+<a class="sourceLine" id="cb41-11" title="11"><span class="st">  </span><span class="kw">mutate</span>(<span class="dt">prc =</span> count<span class="op">/</span>tot,                                                  <span class="co"># calc the % of children below /above poverty line</span></a>
+<a class="sourceLine" id="cb41-12" title="12">         <span class="dt">prc_moe =</span> <span class="kw">moe_ratio</span>(count, tot, count_se<span class="op">*</span><span class="fl">1.645</span>, tot_se<span class="op">*</span><span class="fl">1.645</span>),    <span class="co"># calculate the derived margin of error for the percentage</span></a>
+<a class="sourceLine" id="cb41-13" title="13">         <span class="dt">prc_cv =</span> (prc_moe<span class="op">/</span><span class="fl">1.645</span>)<span class="op">/</span>prc)                   <span class="co"># calculate the coefficient of variation </span></a></code></pre></div>
+</div>
+<div id="review-1" class="section level4">
+<h4>Review</h4>
+<div class="sourceCode" id="cb42"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb42-1" title="1"><span class="kw">head</span>(povChild_lat)</a></code></pre></div>
+<pre><code>## # A tibble: 6 x 10
+##   county latino poverty  count count_se    tot tot_se    prc prc_moe prc_cv
+##   &lt;fct&gt;  &lt;fct&gt;  &lt;fct&gt;    &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;  &lt;dbl&gt;
+## 1 06001  Latinx at or ~  45117     904.  54675   584. 0.825   0.0308 0.0227
+## 2 06001  Latinx below ~   9558     726.  54675   584. 0.175   0.0220 0.0767
+## 3 06001  not L~ at or ~ 109185    1074. 119894   919. 0.911   0.0187 0.0125
+## 4 06001  not L~ below ~  10709     739. 119894   919. 0.0893  0.0102 0.0694
+## 5 06003  Latinx at or ~   3094     204.   3694   193. 0.838   0.116  0.0842
+## 6 06003  Latinx below ~    600     143.   3694   193. 0.162   0.0652 0.244</code></pre>
+</div>
+<div id="repeat-above-summary-function-for-race-groups" class="section level4">
+<h4>Repeat above summary function for race groups</h4>
+<div class="sourceCode" id="cb44"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb44-1" title="1"><span class="co">### calc by race</span></a>
+<a class="sourceLine" id="cb44-2" title="2">povChild_race =</a>
+<a class="sourceLine" id="cb44-3" title="3"><span class="st">  </span>pumsdpov <span class="op">%&gt;%</span></a>
+<a class="sourceLine" id="cb44-4" title="4"><span class="st">  </span><span class="kw">group_by</span>(county, race, poverty) <span class="op">%&gt;%</span><span class="st">  </span></a>
+<a class="sourceLine" id="cb44-5" title="5"><span class="st">  </span><span class="kw">summarise</span>(</a>
+<a class="sourceLine" id="cb44-6" title="6">    <span class="dt">count =</span> <span class="kw">survey_total</span>()) <span class="op">%&gt;%</span><span class="st">       </span></a>
+<a class="sourceLine" id="cb44-7" title="7"><span class="st">  </span></a>
+<a class="sourceLine" id="cb44-8" title="8"><span class="st">  </span><span class="kw">left_join</span>(pumsdpov <span class="op">%&gt;%</span><span class="st">                                                   </span></a>
+<a class="sourceLine" id="cb44-9" title="9"><span class="st">              </span><span class="kw">group_by</span>(county, race) <span class="op">%&gt;%</span><span class="st">                                  </span></a>
+<a class="sourceLine" id="cb44-10" title="10"><span class="st">              </span><span class="kw">summarise</span>(<span class="dt">tot =</span> <span class="kw">survey_total</span>())) <span class="op">%&gt;%</span><span class="st">               </span></a>
+<a class="sourceLine" id="cb44-11" title="11"><span class="st">  </span><span class="kw">mutate</span>(<span class="dt">prc =</span> count<span class="op">/</span>tot,                                                </a>
+<a class="sourceLine" id="cb44-12" title="12">         <span class="dt">prc_moe =</span> <span class="kw">moe_ratio</span>(count, tot, count_se<span class="op">*</span><span class="fl">1.645</span>, tot_se<span class="op">*</span><span class="fl">1.645</span>),    </a>
+<a class="sourceLine" id="cb44-13" title="13">         <span class="dt">prc_cv =</span> (prc_moe<span class="op">/</span><span class="fl">1.645</span>)<span class="op">/</span>prc)              </a>
+<a class="sourceLine" id="cb44-14" title="14"></a>
+<a class="sourceLine" id="cb44-15" title="15"><span class="co"># head(povChild_race)</span></a></code></pre></div>
+</div>
+<div id="repeat-above-summary-function-for-total-population" class="section level4">
+<h4>Repeat above summary function for total population</h4>
+<div class="sourceCode" id="cb45"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb45-1" title="1"><span class="co">### calc for total</span></a>
+<a class="sourceLine" id="cb45-2" title="2">povChildTot &lt;-<span class="st"> </span></a>
+<a class="sourceLine" id="cb45-3" title="3"><span class="st">  </span>pumsdpov <span class="op">%&gt;%</span></a>
+<a class="sourceLine" id="cb45-4" title="4"><span class="st">  </span><span class="kw">group_by</span>(county, poverty) <span class="op">%&gt;%</span><span class="st">  </span></a>
+<a class="sourceLine" id="cb45-5" title="5"><span class="st">  </span><span class="kw">summarise</span>(</a>
+<a class="sourceLine" id="cb45-6" title="6">    <span class="dt">count =</span> <span class="kw">survey_total</span>()) <span class="op">%&gt;%</span><span class="st">       </span></a>
+<a class="sourceLine" id="cb45-7" title="7"><span class="st">  </span></a>
+<a class="sourceLine" id="cb45-8" title="8"><span class="st">  </span><span class="kw">left_join</span>(pumsdpov <span class="op">%&gt;%</span><span class="st">                                      </span></a>
+<a class="sourceLine" id="cb45-9" title="9"><span class="st">              </span><span class="kw">group_by</span>(county) <span class="op">%&gt;%</span><span class="st">                            </span></a>
+<a class="sourceLine" id="cb45-10" title="10"><span class="st">              </span><span class="kw">summarise</span>(<span class="dt">tot =</span> <span class="kw">survey_total</span>())) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb45-11" title="11"><span class="st">  </span></a>
+<a class="sourceLine" id="cb45-12" title="12"><span class="st">  </span><span class="kw">mutate</span>(<span class="dt">raceeth =</span> <span class="st">&quot;Total&quot;</span>,   <span class="co"># note I&#39;ve added a column to assign race = Total </span></a>
+<a class="sourceLine" id="cb45-13" title="13">         <span class="dt">prc =</span> count<span class="op">/</span>tot,                                     </a>
+<a class="sourceLine" id="cb45-14" title="14">         <span class="dt">prc_moe =</span> <span class="kw">moe_ratio</span>(count, tot, count_se<span class="op">*</span><span class="fl">1.645</span>, tot_se<span class="op">*</span><span class="fl">1.645</span>),  </a>
+<a class="sourceLine" id="cb45-15" title="15">         <span class="dt">prc_cv =</span> (prc_moe<span class="op">/</span><span class="fl">1.645</span>)<span class="op">/</span>prc)                  </a></code></pre></div>
+<p>Review:</p>
+<div class="sourceCode" id="cb46"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb46-1" title="1"><span class="kw">head</span>(povChildTot)</a></code></pre></div>
+<pre><code>## # A tibble: 6 x 10
+##   county poverty  count count_se    tot tot_se raceeth   prc prc_moe prc_cv
+##   &lt;fct&gt;  &lt;fct&gt;    &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;chr&gt;   &lt;dbl&gt;   &lt;dbl&gt;  &lt;dbl&gt;
+## 1 06001  at or ~ 154302    1325. 174569  1038. Total   0.884  0.0152 0.0104
+## 2 06001  below ~  20267    1144. 174569  1038. Total   0.116  0.0108 0.0568
+## 3 06003  at or ~  12130     453.  14988   361. Total   0.809  0.0592 0.0445
+## 4 06003  below ~   2858     373.  14988   361. Total   0.191  0.0416 0.133 
+## 5 06005  at or ~  12130     453.  14988   361. Total   0.809  0.0592 0.0445
+## 6 06005  below ~   2858     373.  14988   361. Total   0.191  0.0416 0.133</code></pre>
+</div>
+<div id="combine" class="section level3">
+<h3>Combine</h3>
+<ul>
+<li><p>Combine the three data frames into one data frame.</p></li>
+<li><p>All data frames need to have the same number of columns and the columns must have the same name.</p></li>
+</ul>
+<div class="sourceCode" id="cb48"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb48-1" title="1"><span class="co"># First code consistent race/eth col</span></a>
+<a class="sourceLine" id="cb48-2" title="2">povChild_race<span class="op">$</span>raceeth &lt;-<span class="st"> </span><span class="kw">as.character</span>(povChild_race<span class="op">$</span>race) <span class="co"># make a new column called raceeth, convert factor to character</span></a>
+<a class="sourceLine" id="cb48-3" title="3">povChild_lat<span class="op">$</span>raceeth &lt;-<span class="st"> </span><span class="kw">as.character</span>(povChild_lat<span class="op">$</span>latino)</a>
+<a class="sourceLine" id="cb48-4" title="4"></a>
+<a class="sourceLine" id="cb48-5" title="5"></a>
+<a class="sourceLine" id="cb48-6" title="6"><span class="co"># Combine race/eth estimates with total estimates</span></a>
+<a class="sourceLine" id="cb48-7" title="7">povChildCounty &lt;-<span class="st">  </span></a>
+<a class="sourceLine" id="cb48-8" title="8"><span class="st">  </span><span class="kw">bind_rows</span>(                          <span class="co"># use function bind rows to append dfs</span></a>
+<a class="sourceLine" id="cb48-9" title="9">  </a>
+<a class="sourceLine" id="cb48-10" title="10">    povChild_race <span class="op">%&gt;%</span><span class="st">                 </span><span class="co"># add in race df</span></a>
+<a class="sourceLine" id="cb48-11" title="11"><span class="st">       </span><span class="kw">select</span>(<span class="op">-</span>race) <span class="op">%&gt;%</span><span class="st">              </span><span class="co"># don&#39;t select column &#39;race&#39;</span></a>
+<a class="sourceLine" id="cb48-12" title="12"><span class="st">         </span><span class="kw">filter</span>(raceeth <span class="op">!=</span><span class="st">&quot;White&quot;</span>),   <span class="co"># filter out White Latinx records</span></a>
+<a class="sourceLine" id="cb48-13" title="13">  </a>
+<a class="sourceLine" id="cb48-14" title="14">  povChild_lat <span class="op">%&gt;%</span><span class="st">                    </span><span class="co"># add in latinx df</span></a>
+<a class="sourceLine" id="cb48-15" title="15"><span class="st">       </span><span class="kw">select</span>(<span class="op">-</span>latino) <span class="op">%&gt;%</span><span class="st">            </span><span class="co"># don&#39;t select column &#39;latino&#39;</span></a>
+<a class="sourceLine" id="cb48-16" title="16"><span class="st">         </span><span class="kw">filter</span>(raceeth <span class="op">==</span><span class="st">&quot;Latinx&quot;</span>),  <span class="co"># filter for only Latinx records</span></a>
+<a class="sourceLine" id="cb48-17" title="17">  </a>
+<a class="sourceLine" id="cb48-18" title="18">  povChildTot)                        <span class="co"># add in total pop df</span></a></code></pre></div>
+<div id="review-2" class="section level4">
+<h4>Review</h4>
+<ul>
+<li>We see roughly 58 records per race/county combination, which is what we would expect. Where the data doesn’t exist, i.e. smaller race groups, we see fewer counties.</li>
+</ul>
+<div class="sourceCode" id="cb49"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb49-1" title="1"><span class="kw">table</span>(povChildCounty<span class="op">$</span>raceeth, povChildCounty<span class="op">$</span>poverty)</a></code></pre></div>
+<pre><code>##                   
+##                    at or above the poverty level below the poverty level
+##   AIAN                                        57                      49
+##   Asian                                       58                      52
+##   Black                                       57                      44
+##   Latinx                                      58                      58
+##   NHPI                                        48                      29
+##   Other                                       58                      51
+##   Total                                       58                      58
+##   Two or More                                 58                      57
+##   White non-Latinx                            58                      58</code></pre>
+<ul>
+<li>Review how many race groups per county we get when we set data reliability threshold:</li>
+</ul>
+<div class="sourceCode" id="cb51"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb51-1" title="1"><span class="kw">table</span>(<span class="kw">subset</span>(povChildCounty, prc_cv <span class="op">&lt;=</span><span class="st"> </span><span class="fl">0.4</span> <span class="op">&amp;</span><span class="st"> </span>poverty <span class="op">==</span><span class="st">&quot;at or above the poverty level&quot;</span>)<span class="op">$</span>raceeth, <span class="dt">useNA =</span> <span class="st">&quot;always&quot;</span>)</a></code></pre></div>
+<pre><code>## 
+##             AIAN            Asian            Black           Latinx 
+##               29               33               24               58 
+##             NHPI            Other            Total      Two or More 
+##                9               42               58               58 
+## White non-Latinx             &lt;NA&gt; 
+##               58                0</code></pre>
+<ul>
+<li>Not surprisingly, we see reliable data for some groups in all counties, and other groups (e.g. NHPI) have reliable data in fewer counties.</li>
+</ul>
+</div>
+</div>
+</div>
+<div id="step-4-prepare-data-for-race-counts" class="section level2">
+<h2>Step 4: Prepare data for RACE COUNTS</h2>
+<ul>
+<li>This section is similar to the RC preparation section in Part I, so I’ll move through this quickly:</li>
+</ul>
+<div class="sourceCode" id="cb53"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb53-1" title="1"><span class="co">### get the max value by group and the count of non-NA values</span></a>
+<a class="sourceLine" id="cb53-2" title="2">pov_max &lt;-<span class="st"> </span></a>
+<a class="sourceLine" id="cb53-3" title="3"><span class="st">  </span>povChildCounty <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb53-4" title="4"><span class="st">  </span></a>
+<a class="sourceLine" id="cb53-5" title="5"><span class="st">  </span><span class="co"># filter only records above poverty level--asset based</span></a>
+<a class="sourceLine" id="cb53-6" title="6"><span class="st">  </span><span class="kw">filter</span>(poverty <span class="op">==</span><span class="st">&quot;at or above the poverty level&quot;</span>) <span class="op">%&gt;%</span><span class="st">  </span></a>
+<a class="sourceLine" id="cb53-7" title="7"><span class="st">  </span></a>
+<a class="sourceLine" id="cb53-8" title="8"><span class="st">  </span><span class="co"># Set reliability threshold: if the CV is greater than 40% or the total population (denominator) is less than 100, make null.</span></a>
+<a class="sourceLine" id="cb53-9" title="9"><span class="st">  </span><span class="kw">mutate</span>(<span class="dt">rate =</span> <span class="kw">ifelse</span>(prc_cv <span class="op">&gt;</span><span class="st"> </span><span class="fl">0.4</span> <span class="op">|</span><span class="st"> </span>tot <span class="op">&lt;</span><span class="st"> </span><span class="dv">100</span>, <span class="ot">NA</span>, prc)) <span class="op">%&gt;%</span><span class="st">  </span></a>
+<a class="sourceLine" id="cb53-10" title="10"><span class="st">  </span></a>
+<a class="sourceLine" id="cb53-11" title="11"><span class="st">  </span><span class="co"># Group by county:  Get the max value by county</span></a>
+<a class="sourceLine" id="cb53-12" title="12"><span class="st">  </span><span class="kw">group_by</span>(county) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb53-13" title="13"><span class="st">  </span></a>
+<a class="sourceLine" id="cb53-14" title="14"><span class="st">  </span><span class="co"># remove race category &#39;total&#39; from consideration for max and values count</span></a>
+<a class="sourceLine" id="cb53-15" title="15"><span class="st">  </span><span class="kw">filter</span>(raceeth <span class="op">!=</span><span class="st"> &quot;Total&quot;</span>) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb53-16" title="16"><span class="st">  </span><span class="kw">summarize</span>(<span class="dt">max =</span> <span class="kw">max</span>(rate, <span class="dt">na.rm=</span>T),</a>
+<a class="sourceLine" id="cb53-17" title="17">            <span class="dt">values_count =</span> <span class="kw">sum</span>(<span class="op">!</span><span class="kw">is.na</span>(rate)))</a></code></pre></div>
+<div id="make-sure-you-check-your-data-along-the-way" class="section level4">
+<h4>Make sure you check your data along the way</h4>
+<ul>
+<li>Remember if you run the function <code>View(your data frame name)</code> in the console, you can interact with your data as a spreadsheet, you can filter and sort etc.</li>
+</ul>
+<div class="sourceCode" id="cb54"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb54-1" title="1"><span class="co"># convert long format to long, recode race, get the difference from the best rate</span></a>
+<a class="sourceLine" id="cb54-2" title="2">pov_rc &lt;-<span class="st"> </span></a>
+<a class="sourceLine" id="cb54-3" title="3"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-4" title="4"><span class="st">  </span>povChildCounty <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-5" title="5"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-6" title="6"><span class="st">  </span><span class="co"># filter records</span></a>
+<a class="sourceLine" id="cb54-7" title="7"><span class="st">  </span><span class="kw">filter</span>(poverty <span class="op">==</span><span class="st">&quot;at or above the poverty level&quot;</span>) <span class="op">%&gt;%</span><span class="st">   </span></a>
+<a class="sourceLine" id="cb54-8" title="8"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-9" title="9"><span class="st">  </span><span class="co"># recode raceeth so that there are no spaces or caps and it&#39;ll be postgres-ready</span></a>
+<a class="sourceLine" id="cb54-10" title="10"><span class="st">  </span><span class="kw">mutate</span>( </a>
+<a class="sourceLine" id="cb54-11" title="11">    <span class="dt">raceeth =</span> <span class="kw">recode</span>(raceeth,</a>
+<a class="sourceLine" id="cb54-12" title="12">                     <span class="dt">Asian =</span> <span class="st">&quot;asian&quot;</span>,</a>
+<a class="sourceLine" id="cb54-13" title="13">                     <span class="dt">Black =</span> <span class="st">&quot;black&quot;</span>,</a>
+<a class="sourceLine" id="cb54-14" title="14">                     <span class="st">`</span><span class="dt">AIAN</span><span class="st">`</span> =<span class="st"> &quot;aian&quot;</span>,</a>
+<a class="sourceLine" id="cb54-15" title="15">                     <span class="dt">Other =</span> <span class="st">&quot;other&quot;</span>,</a>
+<a class="sourceLine" id="cb54-16" title="16">                     <span class="st">`</span><span class="dt">NHPI</span><span class="st">`</span> =<span class="st"> &quot;pacisl&quot;</span>,</a>
+<a class="sourceLine" id="cb54-17" title="17">                     <span class="st">`</span><span class="dt">Two or More</span><span class="st">`</span> =<span class="st"> &quot;twoormor&quot;</span>,</a>
+<a class="sourceLine" id="cb54-18" title="18">                     <span class="st">`</span><span class="dt">White non-Latinx</span><span class="st">`</span> =<span class="st">&quot;nh_white&quot;</span>,</a>
+<a class="sourceLine" id="cb54-19" title="19">                     <span class="dt">Latinx =</span> <span class="st">&quot;latino&quot;</span>,</a>
+<a class="sourceLine" id="cb54-20" title="20">                     <span class="dt">Total =</span> <span class="st">&quot;total&quot;</span>)) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-21" title="21"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-22" title="22"><span class="st">  </span><span class="co"># set cv &amp; population filter</span></a>
+<a class="sourceLine" id="cb54-23" title="23"><span class="st">  </span><span class="kw">mutate</span>(<span class="dt">rate =</span> <span class="kw">ifelse</span>(prc_cv <span class="op">&gt;</span><span class="st"> </span><span class="fl">0.4</span> <span class="op">|</span><span class="st"> </span>tot <span class="op">&lt;</span><span class="st"> </span><span class="dv">100</span>, <span class="ot">NA</span>, prc)) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-24" title="24"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-25" title="25"><span class="st">  </span><span class="co"># rename moe and cv columns</span></a>
+<a class="sourceLine" id="cb54-26" title="26"><span class="st">  </span>dplyr<span class="op">::</span><span class="kw">rename</span>(<span class="st">&quot;moe&quot;</span> =<span class="st"> </span>prc_moe,</a>
+<a class="sourceLine" id="cb54-27" title="27">                <span class="st">&quot;cv&quot;</span> =<span class="st"> </span>prc_cv) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-28" title="28"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-29" title="29"><span class="st">  </span><span class="co"># convert to wide format</span></a>
+<a class="sourceLine" id="cb54-30" title="30"><span class="st">  </span><span class="kw">pivot_wider</span>(<span class="dt">id_cols =</span> county,</a>
+<a class="sourceLine" id="cb54-31" title="31">              <span class="dt">names_from =</span> raceeth,</a>
+<a class="sourceLine" id="cb54-32" title="32">              <span class="dt">values_from =</span> <span class="kw">c</span>(<span class="st">&quot;count&quot;</span>, <span class="st">&quot;tot&quot;</span>, <span class="st">&quot;rate&quot;</span>, <span class="st">&quot;moe&quot;</span>, <span class="st">&quot;cv&quot;</span>)) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-33" title="33"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-34" title="34"><span class="st">  </span><span class="co"># join the max and values count df</span></a>
+<a class="sourceLine" id="cb54-35" title="35"><span class="st">  </span><span class="kw">full_join</span>(pov_max) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-36" title="36"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-37" title="37"><span class="st">  </span><span class="co"># subtract each race rate from the max value</span></a>
+<a class="sourceLine" id="cb54-38" title="38"><span class="st">  </span><span class="kw">mutate</span>(</a>
+<a class="sourceLine" id="cb54-39" title="39">    <span class="dt">asian_diff =</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_asian), </a>
+<a class="sourceLine" id="cb54-40" title="40">    <span class="dt">black_diff =</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_black), </a>
+<a class="sourceLine" id="cb54-41" title="41">    <span class="dt">aian_diff =</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_aian), </a>
+<a class="sourceLine" id="cb54-42" title="42">    <span class="dt">other_diff=</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_other), </a>
+<a class="sourceLine" id="cb54-43" title="43">    <span class="dt">pacisl_diff =</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_pacisl), </a>
+<a class="sourceLine" id="cb54-44" title="44">    <span class="dt">twoormor_diff=</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_twoormor), </a>
+<a class="sourceLine" id="cb54-45" title="45">    <span class="dt">nh_white_diff =</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_nh_white), </a>
+<a class="sourceLine" id="cb54-46" title="46">    <span class="dt">latino_diff =</span> <span class="kw">abs</span>(max <span class="op">-</span><span class="st"> </span>rate_latino)) <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-47" title="47"><span class="st">  </span></a>
+<a class="sourceLine" id="cb54-48" title="48"><span class="st">  </span><span class="kw">as.data.frame</span>()</a>
+<a class="sourceLine" id="cb54-49" title="49"></a>
+<a class="sourceLine" id="cb54-50" title="50"></a>
+<a class="sourceLine" id="cb54-51" title="51"><span class="co"># calculate the average of differences</span></a>
+<a class="sourceLine" id="cb54-52" title="52">pov_rc &lt;-<span class="st"> </span></a>
+<a class="sourceLine" id="cb54-53" title="53"><span class="st">  </span>pov_rc <span class="op">%&gt;%</span><span class="st"> </span></a>
+<a class="sourceLine" id="cb54-54" title="54"><span class="st">  </span><span class="kw">mutate</span>(<span class="dt">avg =</span> <span class="kw">rowMeans</span>(<span class="kw">select</span> (., asian_diff<span class="op">:</span>latino_diff), <span class="dt">na.rm =</span> T))</a></code></pre></div>
+</div>
+<div id="done" class="section level4">
+<h4>Done!</h4>
+<ul>
+<li>Your data is wide, you have the mean of differences. Upload to your postgres db and complete the RC index view.</li>
+</ul>
+</div>
+</div>
 </div>
 
 
